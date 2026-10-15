@@ -1,25 +1,42 @@
 #!/bin/bash
 # One-time setup: lets KeepAwake run `sudo -n pmset -a disablesleep 0|1` without a password.
 # Usage:  sudo ./install-sudoers.sh            install
-#         sudo ./install-sudoers.sh --uninstall
+#         sudo ./install-sudoers.sh --uninstall   restore sleep, remove login item, remove the rule
 set -euo pipefail
 
 F=/etc/sudoers.d/keepawake   # no "." in the name, or sudo skips it
+LABEL=local.keepawake
 
 if [[ $EUID -ne 0 ]]; then
   echo "Run: sudo $0 ${1:-}"; exit 1
 fi
 
-if [[ "${1:-}" == "--uninstall" ]]; then
-  rm -f "$F"; echo "Removed $F"; exit 0
-fi
+case "${1:-}" in
+  ''|--uninstall) ;;
+  *) echo "Usage: sudo $0 [--uninstall]"; exit 2 ;;
+esac
 
 U="${SUDO_USER:-}"
-if [[ -z "$U" || "$U" == "root" ]]; then
-  echo "Run it with sudo from your own user account (not as root directly)."; exit 1
+valid_user() { [[ -n "$U" && "$U" != "root" && "$U" =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]]; }
+
+if [[ "${1:-}" == "--uninstall" ]]; then
+  # Order matters: restore sleep first, stop the app while the rule still exists, remove the rule last.
+  /usr/bin/pmset -a disablesleep 0 || true
+  if valid_user; then
+    uid=$(id -u "$U" 2>/dev/null || true)
+    home=$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+    [[ -n "$uid" ]] && { launchctl bootout "gui/$uid/$LABEL" 2>/dev/null || true; }
+    [[ -n "$home" ]] && rm -f "$home/Library/LaunchAgents/$LABEL.plist"
+  fi
+  pkill -TERM -x KeepAwake 2>/dev/null || true
+  sleep 1
+  rm -f "$F"
+  echo "Done: sleep restored, login item removed, $F removed."
+  exit 0
 fi
-if [[ ! "$U" =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]]; then
-  echo "Unexpected username: $U"; exit 1
+
+if ! valid_user; then
+  echo "Run it with sudo from your own user account (not as root directly)."; exit 1
 fi
 if ! grep -q '^[#@]includedir.*sudoers.d' /etc/sudoers; then
   echo "/etc/sudoers has no includedir for sudoers.d; aborting."; exit 1

@@ -6,7 +6,9 @@ APP=KeepAwake.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 
-swiftc -O -swift-version 5 KeepAwake.swift -o "$APP/Contents/MacOS/KeepAwake"
+# Pin the deployment target: a newer toolchain than the OS otherwise stamps a minimum macOS the machine
+# doesn't have, and the app then refuses to open.
+swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" KeepAwake.swift -o "$APP/Contents/MacOS/KeepAwake"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
